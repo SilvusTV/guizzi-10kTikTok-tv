@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TikTok Follow</title>
+  <style>
+    :root {
+      --bg: #000000;           /* fond noir */
+      --fg: #800020;           /* texte par défaut: rouge bordeaux */
+      --status-color: #8a8a8a; /* statut sur fond noir */
+    }
+    /* Thème blanc activé par événement WebSocket */
+    .whiteout {
+      --bg: #ffffff;
+      --fg: #000000;
+      --status-color: #000000; /* pas utilisé car on masque le statut */
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    #value {
+      font-size: clamp(3rem, 12vw, 12rem);
+      font-weight: 800;
+      line-height: 1;
+      text-align: center;
+      letter-spacing: 0.02em;
+    }
+    #status {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+      color: var(--status-color);
+      font-size: 0.9rem;
+      font-weight: 400;
+      text-align: center;
+      opacity: 0.6;
+      user-select: none;
+    }
+    /* En mode whiteout, cacher le statut pour que la page soit visuellement "entièrement blanche" hormis le texte central */
+    body.whiteout #status { display: none; }
+  </style>
+</head>
+<body>
+  <div id="value">…</div>
+  <div id="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const qs = new URLSearchParams(location.search);
+      // Permettre d'overrider la base via ?base=https://exemple.com
+      const base = "http://localhost:4000"
+      const endpoint = `${base}/tiktok/follow`;
+
+      const elValue = document.getElementById('value');
+      const elStatus = document.getElementById('status');
+
+      function show(text) {
+        elValue.textContent = text;
+      }
+
+      function setStatus(msg) {
+        elStatus.textContent = msg || '';
+      }
+
+      let inFlight = false;
+      let lastGood = '';
+
+      async function fetchAndUpdate() {
+        if (inFlight) return; // évite le chevauchement
+        inFlight = true;
+        try {
+          setStatus(`Récupération depuis ${endpoint}`);
+          const res = await fetch(endpoint, { cache: 'no-store' });
+
+          // Lire le corps quel que soit le statut pour exposer les erreurs serveur
+          let raw = '';
+          try { raw = await res.text(); } catch {}
+          const contentType = (res.headers.get('content-type') || '');
+
+          if (!res.ok) {
+            const snippet = raw ? ` — ${raw.trim().slice(0, 200)}` : '';
+            const statusText = res.statusText ? ` ${res.statusText}` : '';
+            throw new Error(`HTTP ${res.status}${statusText}${snippet}`);
+          }
+
+          let text = (raw || '').trim();
+
+          // Si la réponse ressemble à du JSON, essayons de l'interpréter
+          try {
+            if (contentType.includes('application/json')) {
+              const json = JSON.parse(raw || 'null');
+              // Extraire précisément data.followers d'abord, puis retomber sur d'autres clés connues
+              const candidate =
+                (json && typeof json === 'object' && json.data && typeof json.data === 'object' && json.data.followers != null ? json.data.followers : null)
+                ?? json.followers
+                ?? json.value
+                ?? json.count
+                ?? json.total
+                ?? json.follow
+                ?? (typeof (json && json.data) === 'number' ? json.data : null);
+
+              if (candidate !== null && candidate !== undefined) {
+                text = String(candidate);
+              } else if (json !== null && json !== undefined) {
+                text = JSON.stringify(json);
+              }
+            }
+          } catch {
+            // garde le texte brut
+          }
+
+          show(text || '');
+          lastGood = text || lastGood;
+          setStatus('');
+        } catch (err) {
+          console.error(err);
+          // Conserver la dernière bonne valeur affichée si disponible
+          if (lastGood) show(lastGood);
+          else show('—');
+          setStatus(`Impossible de récupérer la valeur (${err && err.message ? err.message : err}). Assurez-vous que ${endpoint} est accessible (CORS/same-origin).`);
+        } finally {
+          inFlight = false;
+        }
+      }
+
+      // Premier chargement immédiat
+      fetchAndUpdate();
+      // Rafraîchissement toutes les 2 minutes (120 000 ms)
+      setInterval(fetchAndUpdate, 120000);
+
+      // -------------------- WebSocket: whiteout trigger --------------------
+      function toWsUrl(httpBase) {
+        try {
+          const u = new URL(httpBase);
+          u.protocol = (u.protocol === 'https:') ? 'wss:' : 'ws:';
+          // Se connecter à la racine du host (ws://host:port)
+          u.pathname = '/';
+          u.search = '';
+          u.hash = '';
+          // Retirer trailing slash
+          return u.toString().replace(/\/$/, '');
+        } catch {
+          return (httpBase || '').replace(/^https?:/i, (m) => m.toLowerCase() === 'https:' ? 'wss:' : 'ws:');
+        }
+      }
+
+      const wsUrl = toWsUrl(base) + '/?id=tv';
+      let ws;
+      let wsShouldReconnect = true;
+      let wsConnecting = false;
+      let wsBackoff = 1000; // 1s
+
+      function triggerWhiteout() {
+        document.body.classList.add('whiteout');
+        // Optionnel: forcer la couleur du texte maintenant (variables CSS déjà gèrent)
+        setStatus(''); // cacher statut via CSS
+      }
+
+      function handleWsMessage(ev) {
+        try {
+          let payload = ev.data;
+          let obj;
+          if (typeof payload === 'string') {
+            try { obj = JSON.parse(payload); } catch {}
+            if (!obj) {
+              // Fallback: formats simples, ex: "tiktok:don:2"
+              const s = payload.trim();
+              const parts = s.split(/[: ,]+/);
+              if (parts.length >= 3 && parts[0] === 'tiktok' && parts[1] === 'don') {
+                obj = { type: 'tiktok:don', data: Number(parts[2]) };
+              }
+            }
+          } else if (payload instanceof Blob) {
+            // Lire Blob comme texte puis reparser
+            const reader = new FileReader();
+            reader.onload = () => handleWsMessage({ data: String(reader.result || '') });
+            reader.readAsText(payload);
+            return;
+          }
+
+          if (obj && obj.type === 'tiktok:don') {
+            const val = (obj.data != null ? Number(obj.data) : NaN);
+            if (!Number.isNaN(val) && val === 2) {
+              triggerWhiteout();
+            }
+          }
+        } catch (e) {
+          console.warn('WS message parse error:', e);
+        }
+      }
+
+      function connectWs() {
+        if (wsConnecting || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+        wsConnecting = true;
+        try {
+          setStatus(`Connexion WS ${wsUrl}…`);
+          ws = new WebSocket(wsUrl);
+          ws.onopen = () => {
+            wsConnecting = false;
+            wsBackoff = 1000;
+            setStatus('WS connecté');
+          };
+          ws.onmessage = handleWsMessage;
+          ws.onerror = () => {
+            // Erreur silencieuse; close gérera reconnect
+          };
+          ws.onclose = () => {
+            setStatus('WS déconnecté');
+            wsConnecting = false;
+            if (!wsShouldReconnect) return;
+            const delay = Math.min(wsBackoff, 10000);
+            wsBackoff = Math.min(wsBackoff * 2, 10000);
+            setTimeout(connectWs, delay);
+          };
+        } catch (e) {
+          wsConnecting = false;
+          setTimeout(connectWs, Math.min(wsBackoff, 10000));
+          wsBackoff = Math.min(wsBackoff * 2, 10000);
+        }
+      }
+
+      connectWs();
+      window.addEventListener('beforeunload', () => {
+        wsShouldReconnect = false;
+        try { ws && ws.close(); } catch {}
+      });
+    })();
+  </script>
+</body>
+</html>
