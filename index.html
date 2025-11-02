@@ -62,7 +62,7 @@
       const base = qs.get('base') || "https://guizzi.server.silvus.me";
       const username = (qs.get('username') || qs.get('user') || 'freekadelle_').trim();
       // Nouvel endpoint HTTP: déclenche seulement le job; la réponse arrive via WebSocket
-      const endpoint = `${base.replace(/\/$/, '')}/follow?username=${encodeURIComponent(username)}`;
+      const endpoint = `${base.replace(/\/$/, '')}/tiktok/follow?username=${encodeURIComponent(username)}`;
 
       const elValue = document.getElementById('value');
       const elStatus = document.getElementById('status');
