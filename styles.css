@@ -1,0 +1,44 @@
+:root {
+  --bg: #000000;           /* fond noir */
+  --fg: #800020;           /* texte par défaut: rouge bordeaux */
+  --status-color: #8a8a8a; /* statut sur fond noir */
+}
+/* Thème blanc activé par événement WebSocket */
+.whiteout {
+  --bg: #ffffff;
+  --fg: #000000;
+  --status-color: #000000; /* pas utilisé car on masque le statut */
+}
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+}
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+#value {
+  font-size: clamp(3rem, 12vw, 12rem);
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+#status {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  color: var(--status-color);
+  font-size: 0.9rem;
+  font-weight: 400;
+  text-align: center;
+  opacity: 0.6;
+  user-select: none;
+}
+/* En mode whiteout, cacher le statut pour que la page soit visuellement "entièrement blanche" hormis le texte central */
+body.whiteout #status { display: none; }
