@@ -61,8 +61,6 @@
       // Paramètres: ?base=..., ?username=... (ou ?user=...)
       const base = qs.get('base') || "https://guizzi.server.silvus.me";
       const username = (qs.get('username') || qs.get('user') || 'freekadelle_').trim();
-      // Nouvel endpoint HTTP: déclenche seulement le job; la réponse arrive via WebSocket
-      const endpoint = `${base.replace(/\/$/, '')}/tiktok/follow?username=${encodeURIComponent(username)}`;
 
       const elValue = document.getElementById('value');
       const elStatus = document.getElementById('status');
@@ -75,42 +73,9 @@
         elStatus.textContent = msg || '';
       }
 
-      let inFlight = false;
       let lastGood = '';
 
-      async function fetchAndUpdate() {
-        if (inFlight) return; // évite le chevauchement
-        inFlight = true;
-        try {
-          setStatus(`Commande envoyée à ${endpoint} (user: ${username}). Attente du résultat via WebSocket…`);
-          const res = await fetch(endpoint, { cache: 'no-store' });
-
-          // On ne s'attend pas à recevoir la valeur ici: le serveur répondra via WS.
-          // On lit tout de même le corps pour afficher une éventuelle erreur HTTP.
-          let raw = '';
-          try { raw = await res.text(); } catch {}
-
-          if (!res.ok) {
-            const snippet = raw ? ` — ${raw.trim().slice(0, 200)}` : '';
-            const statusText = res.statusText ? ` ${res.statusText}` : '';
-            throw new Error(`HTTP ${res.status}${statusText}${snippet}`);
-          }
-
-          // OK => ne pas écraser l'affichage en attendant l'update WS
-          // Si aucune valeur précédente, afficher des points de suspension
-          if (!lastGood) show('…');
-        } catch (err) {
-          console.error(err);
-          if (lastGood) show(lastGood);
-          else show('—');
-          setStatus(`Échec du déclenchement (${err && err.message ? err.message : err}). Vérifiez l’accessibilité de ${endpoint} (CORS/same-origin).`);
-        } finally {
-          inFlight = false;
-        }
-      }
-
-      // Déclenchement unique au chargement (le résultat arrive via WS)
-      fetchAndUpdate();
+      // Déclenchement via WebSocket uniquement: aucune requête HTTP n'est faite ici.
 
       // -------------------- WebSocket: whiteout trigger --------------------
       function toWsUrl(httpBase) {
@@ -133,6 +98,42 @@
       let wsShouldReconnect = true;
       let wsConnecting = false;
       let wsBackoff = 1000; // 1s
+      // Timers for keep-alive and periodic scraping
+      let keepAliveTimerId = 0;
+      let periodicTimerId = 0;
+      
+      function requestScrape() {
+        try {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const msg = { type: 'tiktok:scrape', payload: { username } };
+            ws.send(JSON.stringify(msg));
+            setStatus(`Commande WS envoyée pour @${username}…`);
+            if (!lastGood) show('…');
+          }
+        } catch {}
+      }
+
+      function startWsTimers() {
+        // Clear any existing timers first
+        stopWsTimers();
+        // Keep-alive ping every 30s
+        keepAliveTimerId = setInterval(() => {
+          try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+            }
+          } catch {}
+        }, 30000);
+        // Periodic scrape every 120s
+        periodicTimerId = setInterval(() => {
+          requestScrape();
+        }, 120000);
+      }
+
+      function stopWsTimers() {
+        if (keepAliveTimerId) { try { clearInterval(keepAliveTimerId); } catch {} keepAliveTimerId = 0; }
+        if (periodicTimerId) { try { clearInterval(periodicTimerId); } catch {} periodicTimerId = 0; }
+      }
 
       function triggerWhiteout() {
         document.body.classList.add('whiteout');
@@ -237,7 +238,9 @@
           ws.onopen = () => {
             wsConnecting = false;
             wsBackoff = 1000;
-            setStatus('WS connecté');
+            setStatus('WS connecté — envoi de la commande…');
+            startWsTimers();
+            requestScrape();
           };
           ws.onmessage = handleWsMessage;
           ws.onerror = () => {
@@ -246,6 +249,7 @@
           ws.onclose = () => {
             setStatus('WS déconnecté');
             wsConnecting = false;
+            stopWsTimers();
             if (!wsShouldReconnect) return;
             const delay = Math.min(wsBackoff, 10000);
             wsBackoff = Math.min(wsBackoff * 2, 10000);
@@ -261,6 +265,7 @@
       connectWs();
       window.addEventListener('beforeunload', () => {
         wsShouldReconnect = false;
+        stopWsTimers();
         try { ws && ws.close(); } catch {}
       });
     })();
