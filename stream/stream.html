@@ -8,13 +8,26 @@
     /* Page blanche, rien d'affiché par défaut */
     html, body { height: 100%; margin: 0; background: #fff; }
 
+    /* Lecteur audio YouTube totalement invisible à l'écran (mais présent dans le flux) */
+    #bg-audio-player {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      bottom: 0;
+      left: 0;
+      opacity: 0;
+      pointer-events: none;
+      z-index: -1;
+    }
+    #bg-audio-player iframe { width: 1px; height: 1px; border: 0; display: block; }
+
     /* Copie de l'architecture CSS du reste (tv): .yt-overlay > .yt-frame > iframe */
     .yt-overlay {
       position: fixed;
       bottom: 0;
       left: 0;
-      width: 33vw;
-      height: 33vh;
+      width: 25vw;
+      height: 25vh;
       z-index: 10;
     }
     .yt-overlay .yt-frame {
@@ -40,6 +53,9 @@
   </style>
 </head>
 <body>
+  <!-- Lecteur audio YouTube caché -->
+  <div id="bg-audio-player" aria-hidden="true"></div>
+
   <!-- Page blanche: aucun markup initial. Le lecteur est injecté dynamiquement avec
        exactement la même structure que la TV: #yt-overlay.yt-overlay > .yt-frame > iframe -->
 
@@ -114,6 +130,126 @@
       return '';
     }
 
+    // -------- Lecteur audio YouTube caché (playlist aléatoire quand amount=2)
+    const AUDIO_PLAYLIST_ID = 'PLHCb-coSoXZgy8sVsu8HxSykFZEnWFNc5';
+    let ytApiReady = false;
+    let audioPlayer = null;
+    let audioReady = false;
+    let audioBusy = false;
+    const audioQueue = [];
+
+    // Charger IFrame API YouTube une seule fois
+    (function loadYouTubeAPI(){
+      if (window.YT && window.YT.Player) { ytApiReady = true; return; }
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      window.onYouTubeIframeAPIReady = function(){ ytApiReady = true; initAudioPlayer(); };
+    })();
+
+    function initAudioPlayer(){
+      try {
+        if (!ytApiReady || audioPlayer) return;
+        audioPlayer = new YT.Player('bg-audio-player', {
+          height: '1', width: '1',
+          playerVars: {
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+          },
+          events: {
+            onReady: onAudioReady,
+            onStateChange: onAudioStateChange,
+            onError: onAudioError
+          }
+        });
+      } catch {}
+    }
+
+    function onAudioReady(){
+      try {
+        audioReady = true;
+        // Préparer la playlist
+        if (audioPlayer && audioPlayer.cuePlaylist) {
+          audioPlayer.cuePlaylist({ listType: 'playlist', list: AUDIO_PLAYLIST_ID, index: 0 });
+        }
+        // Forcer le son à 100%
+        if (audioPlayer && audioPlayer.unMute) {
+          audioPlayer.unMute();
+          audioPlayer.setVolume && audioPlayer.setVolume(100);
+        }
+        // S'il y a des éléments en file, démarrer
+        drainQueueIfIdle();
+      } catch {}
+    }
+
+    function onAudioStateChange(ev){
+      const YTST = window.YT && window.YT.PlayerState;
+      if (!YTST) return;
+      try {
+        if (ev.data === YTST.PLAYING) {
+          audioBusy = true;
+        } else if (ev.data === YTST.ENDED) {
+          audioBusy = false;
+          drainQueueIfIdle();
+        } else if (ev.data === YTST.CUED) {
+          // Playlist prête à être lue
+        }
+      } catch {}
+    }
+
+    function onAudioError(){
+      // En cas d'erreur, passer au suivant dans la file
+      audioBusy = false;
+      drainQueueIfIdle();
+    }
+
+    function enqueueAudioPlay(){
+      audioQueue.push(1);
+      drainQueueIfIdle();
+    }
+
+    function drainQueueIfIdle(){
+      if (!ytApiReady) { initAudioPlayer(); return; }
+      if (!audioReady || !audioPlayer) return;
+      if (audioBusy) return;
+      if (!audioQueue.length) return;
+
+      // Démarrer une lecture aléatoire depuis la playlist
+      try {
+        audioPlayer.setShuffle && audioPlayer.setShuffle(true);
+        const list = audioPlayer.getPlaylist ? audioPlayer.getPlaylist() : null;
+        const len = Array.isArray(list) ? list.length : 0;
+        if (len > 0) {
+          const idx = Math.floor(Math.random() * len);
+          audioPlayer.unMute && audioPlayer.unMute();
+          audioPlayer.setVolume && audioPlayer.setVolume(100);
+          audioPlayer.playVideoAt(idx);
+        } else if (audioPlayer.loadPlaylist) {
+          // Charge et joue directement la playlist (l'index réel sera géré après)
+          audioPlayer.unMute && audioPlayer.unMute();
+          audioPlayer.setVolume && audioPlayer.setVolume(100);
+          audioPlayer.loadPlaylist({ listType: 'playlist', list: AUDIO_PLAYLIST_ID, index: 0 });
+        }
+        audioBusy = true;
+        audioQueue.shift();
+      } catch {
+        // Si erreur, on consomme l'élément pour éviter blocage
+        audioQueue.shift();
+        audioBusy = false;
+      }
+    }
+
+    function stopAudio(){
+      try { audioPlayer && audioPlayer.stopVideo && audioPlayer.stopVideo(); } catch {}
+      audioBusy = false;
+    }
+
     // -------- Affichage YouTube avec EXACTEMENT la même structure que la TV
     let ytTimer = 0;
     function showYouTubePreview(videoId, durationMs = 10000) {
@@ -166,16 +302,21 @@
       if (type === 'tiktok:don'){
         if (payload && typeof payload === 'object' && ('amount' in payload)){
           const amount = Number(payload.amount);
-          if (!Number.isNaN(amount) && amount === 5){
-            const message = (payload && payload.message) ? String(payload.message) : '';
-            const vid = extractYouTubeId(message);
-            if (vid) showYouTubePreview(vid, 10000);
+          if (!Number.isNaN(amount)){
+            if (amount === 2){
+              enqueueAudioPlay();
+            } else if (amount === 5){
+              const message = (payload && payload.message) ? String(payload.message) : '';
+              const vid = extractYouTubeId(message);
+              if (vid) showYouTubePreview(vid, 10000);
+            }
           }
           return;
         }
         const val = (payload != null ? Number(payload) : Number(obj && obj.data));
         if (!Number.isNaN(val)){
-          // Ancien format numérique seul: rien à faire sans lien YouTube
+          if (val === 2){ enqueueAudioPlay(); return; }
+          // Ancien format numérique seul: rien à faire sans lien YouTube sinon
           return;
         }
       }
