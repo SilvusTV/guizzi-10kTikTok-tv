@@ -65,20 +65,17 @@ body.whiteout #status { display: none; }
 /* YouTube preview overlay (shown on donation amount=5) */
 .yt-overlay {
   position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000; /* au-dessus du speaker */
-  pointer-events: none; /* pas d'interaction utilisateur */
+  bottom: 0;
+  right: 0;
+  width: 50%;
+  height: 50%;
+  z-index: 10;
 }
 .yt-overlay .yt-frame {
-  width: min(90vw, 1600px);
-  aspect-ratio: 16/9;
-  background: #000;
+  background: transparent;
   border-radius: 8px;
   overflow: hidden;
-  transform: scale(0.98);
+  transform: scale(0.75);
   opacity: 0;
   transition: opacity 200ms ease, transform 200ms ease;
 }

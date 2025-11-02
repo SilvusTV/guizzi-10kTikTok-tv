@@ -66,7 +66,7 @@ export function showYouTubePreview(videoId, durationMs = 10000) {
   const iframe = document.createElement('iframe');
   const params = new URLSearchParams({
     autoplay: '1',
-    mute: '1',
+    volume: '100',
     controls: '0',
     start: '0',
     end: '10',
