@@ -67,8 +67,8 @@ body.whiteout #status { display: none; }
   position: fixed;
   bottom: 0;
   right: 0;
-  width: 50%;
-  height: 50%;
+  width: 50vw;
+  height: 50vh;
   z-index: 10;
 }
 .yt-overlay .yt-frame {
@@ -82,6 +82,8 @@ body.whiteout #status { display: none; }
 .yt-overlay.visible .yt-frame {
   opacity: 1;
   transform: scale(1);
+  height: 100%;
+  width: 100%;
 }
 .yt-overlay iframe {
   width: 100%;
