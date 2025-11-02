@@ -135,12 +135,11 @@
     let ytApiReady = false;
     let audioPlayer = null;
     let audioReady = false;
-    let audioBusy = false;
-    const audioQueue = [];
+    let pendingPlay = false; // simple drapeau pour rejouer dès que prêt (pas de file)
 
     // Charger IFrame API YouTube une seule fois
     (function loadYouTubeAPI(){
-      if (window.YT && window.YT.Player) { ytApiReady = true; return; }
+      if (window.YT && window.YT.Player) { ytApiReady = true; initAudioPlayer(); return; }
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       const firstScriptTag = document.getElementsByTagName('script')[0];
@@ -163,9 +162,7 @@
             playsinline: 1
           },
           events: {
-            onReady: onAudioReady,
-            onStateChange: onAudioStateChange,
-            onError: onAudioError
+            onReady: onAudioReady
           }
         });
       } catch {}
@@ -183,71 +180,37 @@
           audioPlayer.unMute();
           audioPlayer.setVolume && audioPlayer.setVolume(100);
         }
-        // S'il y a des éléments en file, démarrer
-        drainQueueIfIdle();
+        // Si on a demandé une lecture avant que ce soit prêt, lance maintenant
+        if (pendingPlay) { pendingPlay = false; playRandomFromPlaylist(); }
       } catch {}
     }
 
-    function onAudioStateChange(ev){
-      const YTST = window.YT && window.YT.PlayerState;
-      if (!YTST) return;
-      try {
-        if (ev.data === YTST.PLAYING) {
-          audioBusy = true;
-        } else if (ev.data === YTST.ENDED) {
-          audioBusy = false;
-          drainQueueIfIdle();
-        } else if (ev.data === YTST.CUED) {
-          // Playlist prête à être lue
-        }
-      } catch {}
-    }
-
-    function onAudioError(){
-      // En cas d'erreur, passer au suivant dans la file
-      audioBusy = false;
-      drainQueueIfIdle();
-    }
-
-    function enqueueAudioPlay(){
-      audioQueue.push(1);
-      drainQueueIfIdle();
-    }
-
-    function drainQueueIfIdle(){
-      if (!ytApiReady) { initAudioPlayer(); return; }
-      if (!audioReady || !audioPlayer) return;
-      if (audioBusy) return;
-      if (!audioQueue.length) return;
-
-      // Démarrer une lecture aléatoire depuis la playlist
+    function playRandomFromPlaylist(){
+      // Si l'API ou le player ne sont pas prêts, on prépare et on rejouera à onReady
+      if (!ytApiReady || !audioPlayer || !audioReady) {
+        pendingPlay = true;
+        initAudioPlayer();
+        return;
+      }
       try {
         audioPlayer.setShuffle && audioPlayer.setShuffle(true);
+        audioPlayer.unMute && audioPlayer.unMute();
+        audioPlayer.setVolume && audioPlayer.setVolume(100);
         const list = audioPlayer.getPlaylist ? audioPlayer.getPlaylist() : null;
         const len = Array.isArray(list) ? list.length : 0;
         if (len > 0) {
           const idx = Math.floor(Math.random() * len);
-          audioPlayer.unMute && audioPlayer.unMute();
-          audioPlayer.setVolume && audioPlayer.setVolume(100);
-          audioPlayer.playVideoAt(idx);
+          audioPlayer.playVideoAt ? audioPlayer.playVideoAt(idx) : audioPlayer.playVideo && audioPlayer.playVideo();
         } else if (audioPlayer.loadPlaylist) {
-          // Charge et joue directement la playlist (l'index réel sera géré après)
-          audioPlayer.unMute && audioPlayer.unMute();
-          audioPlayer.setVolume && audioPlayer.setVolume(100);
           audioPlayer.loadPlaylist({ listType: 'playlist', list: AUDIO_PLAYLIST_ID, index: 0 });
+        } else if (audioPlayer.playVideo) {
+          audioPlayer.playVideo();
         }
-        audioBusy = true;
-        audioQueue.shift();
-      } catch {
-        // Si erreur, on consomme l'élément pour éviter blocage
-        audioQueue.shift();
-        audioBusy = false;
-      }
+      } catch {}
     }
 
     function stopAudio(){
       try { audioPlayer && audioPlayer.stopVideo && audioPlayer.stopVideo(); } catch {}
-      audioBusy = false;
     }
 
     // -------- Affichage YouTube avec EXACTEMENT la même structure que la TV
@@ -304,7 +267,7 @@
           const amount = Number(payload.amount);
           if (!Number.isNaN(amount)){
             if (amount === 2){
-              enqueueAudioPlay();
+              playRandomFromPlaylist();
             } else if (amount === 5){
               const message = (payload && payload.message) ? String(payload.message) : '';
               const vid = extractYouTubeId(message);
@@ -315,7 +278,7 @@
         }
         const val = (payload != null ? Number(payload) : Number(obj && obj.data));
         if (!Number.isNaN(val)){
-          if (val === 2){ enqueueAudioPlay(); return; }
+          if (val === 2){ playRandomFromPlaylist(); return; }
           // Ancien format numérique seul: rien à faire sans lien YouTube sinon
           return;
         }
