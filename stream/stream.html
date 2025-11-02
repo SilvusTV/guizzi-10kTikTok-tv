@@ -12,9 +12,9 @@
     .yt-overlay {
       position: fixed;
       bottom: 0;
-      right: 0;
-      width: 50vw;
-      height: 50vh;
+      left: 0;
+      width: 33vw;
+      height: 33vh;
       z-index: 10;
     }
     .yt-overlay .yt-frame {
@@ -132,7 +132,8 @@
       const iframe = document.createElement('iframe');
       const params = new URLSearchParams({
         autoplay: '1',
-        mute: '1',
+        mute: '0',
+        volume: '100',
         controls: '0',
         start: '0',
         end: '10',
