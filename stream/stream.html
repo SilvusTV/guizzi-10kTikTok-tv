@@ -8,47 +8,40 @@
     /* Page blanche, rien d'affiché par défaut */
     html, body { height: 100%; margin: 0; background: #fff; }
 
-    /* Lecteur YouTube: bas-gauche, ~33% de l'écran, caché tant qu'il n'est pas utilisé */
-    .yt-parent {
-      position: fixed;
-      left: 12px;
-      bottom: 12px;
-      width: 33vw;
-      height: 33vh;
-      max-width: 640px; /* garde-fous */
-      max-height: 360px;
-      z-index: 1000;
-      border-radius: 10px;
-      overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
-      border: 1px solid rgba(0,0,0,0.08);
-      background: #000;
-      display: none; /* invisible par défaut */
-    }
-    /* Le conteneur interne occupe tout l'espace du parent */
-    .yt-wrap { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .yt-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-
-    /* Overlay si l'autoplay sonore est bloqué */
+    /* Copie de l'architecture CSS du reste (tv): .yt-overlay > .yt-frame > iframe */
     .yt-overlay {
-      position: absolute; inset: 0;
-      display: none; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.45);
-      color: #fff; font-weight: 700; text-align: center; padding: 8px;
-      cursor: pointer;
-      user-select: none;
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      width: 50vw;
+      height: 50vh;
+      z-index: 10;
     }
-    .yt-overlay.show { display: flex; }
+    .yt-overlay .yt-frame {
+      background: transparent;
+      border-radius: 8px;
+      overflow: hidden;
+      transform: scale(0.50);
+      transform-origin: bottom right;
+      aspect-ratio: 16/9;
+      opacity: 0;
+      transition: opacity 200ms ease, transform 200ms ease;
+    }
+    .yt-overlay.visible .yt-frame {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .yt-overlay iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
   </style>
 </head>
 <body>
-  <!-- Uniquement le conteneur vidéo, caché par défaut -->
-  <div id="ytParent" class="yt-parent">
-    <div id="ytContainer" class="yt-wrap">
-      <div id="ytPlayer"></div>
-      <div id="ytOverlay" class="yt-overlay">Cliquez pour autoriser la lecture avec le son</div>
-    </div>
-  </div>
+  <!-- Page blanche: aucun markup initial. Le lecteur est injecté dynamiquement avec
+       exactement la même structure que la TV: #yt-overlay.yt-overlay > .yt-frame > iframe -->
 
   <script>
   (function(){
@@ -121,80 +114,46 @@
       return '';
     }
 
-    // -------- YouTube player (10s, volume 100%, son actif)
-    const ytParent = document.getElementById('ytParent');
-    const ytWrap = document.getElementById('ytContainer');
-    const ytOverlay = document.getElementById('ytOverlay');
-    let ytPlayer = null; let ytTmr = null;
-
-    function ensureYouTubeAPI(cb){
-      if (window.YT && window.YT.Player) { cb(); return; }
-      const existing = document.querySelector('script[src*="youtube.com/iframe_api"]');
-      // Toujours (ré)associer le callback prêt
-      window.onYouTubeIframeAPIReady = () => cb();
-      if (existing) return; // script déjà en cours de chargement
-      const s = document.createElement('script');
-      s.src = 'https://www.youtube.com/iframe_api';
-      s.async = true;
-      document.head.appendChild(s);
-    }
-
-    function hidePlayer(){
-      clearTimeout(ytTmr);
-      try { ytPlayer && ytPlayer.stopVideo && ytPlayer.stopVideo(); } catch {}
-      try { ytPlayer && ytPlayer.destroy && ytPlayer.destroy(); } catch {}
-      ytPlayer = null;
-      if (ytParent) ytParent.style.display = 'none';
-      ytOverlay.classList.remove('show');
-      try { console.debug('[stream] hidePlayer: done'); } catch {}
-    }
-
-    function showYouTubePreview(videoId){
+    // -------- Affichage YouTube avec EXACTEMENT la même structure que la TV
+    let ytTimer = 0;
+    function showYouTubePreview(videoId, durationMs = 10000) {
       if (!videoId) return;
-      clearTimeout(ytTmr);
-      if (ytParent) ytParent.style.display = '';
-      try { console.debug('[stream] showYouTubePreview:', videoId); } catch {}
-      ensureYouTubeAPI(() => {
-        try { ytPlayer && ytPlayer.destroy && ytPlayer.destroy(); } catch {}
-        ytPlayer = new YT.Player('ytPlayer', {
-          width: '100%', height: '100%', videoId,
-          playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1 },
-          events: {
-            onReady: (e) => {
-              try { e.target.unMute && e.target.unMute(); } catch {}
-              try { e.target.setVolume && e.target.setVolume(100); } catch {}
-              try { e.target.playVideo && e.target.playVideo(); } catch {}
-              // Harden iframe permissions to reduce feature policy warnings
-              try {
-                const iframe = e.target.getIframe ? e.target.getIframe() : null;
-                if (iframe) {
-                  iframe.setAttribute('allow', 'autoplay; encrypted-media; clipboard-write; picture-in-picture');
-                  iframe.setAttribute('title', 'YouTube video preview');
-                }
-              } catch {}
-              // If autoplay with sound is blocked, show overlay to request user gesture
-              setTimeout(() => {
-                try {
-                  const state = e.target.getPlayerState ? e.target.getPlayerState() : undefined;
-                  if (typeof YT !== 'undefined') {
-                    const notPlaying = state === YT.PlayerState.UNSTARTED || state === YT.PlayerState.PAUSED || state === YT.PlayerState.CUED;
-                    if (notPlaying) ytOverlay.classList.add('show');
-                  }
-                } catch {}
-              }, 600);
-            }
-          }
-        });
-        ytTmr = setTimeout(hidePlayer, 10000);
+      try { if (ytTimer) clearTimeout(ytTimer); } catch {}
+      const prev = document.getElementById('yt-overlay');
+      if (prev && prev.parentElement) {
+        try { prev.parentElement.removeChild(prev); } catch {}
+      }
+      const overlay = document.createElement('div');
+      overlay.id = 'yt-overlay';
+      overlay.className = 'yt-overlay visible';
+      overlay.setAttribute('aria-hidden', 'true');
+      const frame = document.createElement('div');
+      frame.className = 'yt-frame';
+      const iframe = document.createElement('iframe');
+      const params = new URLSearchParams({
+        autoplay: '1',
+        mute: '1',
+        controls: '0',
+        start: '0',
+        end: '10',
+        playsinline: '1',
+        modestbranding: '1',
+        rel: '0'
       });
-    }
+      iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${params.toString()}`;
+      iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+      iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+      frame.appendChild(iframe);
+      overlay.appendChild(frame);
+      document.body.appendChild(overlay);
 
-    ytOverlay.addEventListener('click', () => {
-      try { ytPlayer && ytPlayer.playVideo && ytPlayer.playVideo(); } catch {}
-      try { ytPlayer && ytPlayer.unMute && ytPlayer.unMute(); } catch {}
-      try { ytPlayer && ytPlayer.setVolume && ytPlayer.setVolume(100); } catch {}
-      ytOverlay.classList.remove('show');
-    });
+      ytTimer = setTimeout(() => {
+        try {
+          if (overlay && overlay.parentElement) overlay.parentElement.removeChild(overlay);
+        } catch {}
+        ytTimer = 0;
+      }, Math.max(0, Number(durationMs) || 10000));
+    }
 
     // -------- Démarrage: page blanche + WebSocket silencieux
     const { base } = getParams();
@@ -209,7 +168,7 @@
           if (!Number.isNaN(amount) && amount === 5){
             const message = (payload && payload.message) ? String(payload.message) : '';
             const vid = extractYouTubeId(message);
-            if (vid) showYouTubePreview(vid);
+            if (vid) showYouTubePreview(vid, 10000);
           }
           return;
         }
