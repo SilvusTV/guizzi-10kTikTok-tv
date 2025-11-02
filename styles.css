@@ -42,3 +42,22 @@ body {
 }
 /* En mode whiteout, cacher le statut pour que la page soit visuellement "entièrement blanche" hormis le texte central */
 body.whiteout #status { display: none; }
+
+/* Speaker overlay (shown on donation amount=2) */
+.speaker-overlay {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  font-size: clamp(48px, 10vw, 160px);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 9999;
+  pointer-events: none;
+  user-select: none;
+}
+.speaker-overlay.visible {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}

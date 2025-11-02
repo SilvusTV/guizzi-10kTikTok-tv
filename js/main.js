@@ -1,5 +1,5 @@
 import { getParams, getWsUrl, DEFAULT_PING_INTERVAL, DEFAULT_SCRAPE_INTERVAL } from './config.js';
-import { getElements, show as uiShow, setStatus as uiSetStatus, triggerWhiteout } from './ui.js';
+import { getElements, show as uiShow, setStatus as uiSetStatus, triggerWhiteout, showSpeakerIcon } from './ui.js';
 import { createWsConnection } from './ws.js';
 import { handleWsMessage } from './handlers.js';
 
@@ -56,7 +56,7 @@ import { handleWsMessage } from './handlers.js';
       requestScrape();
     },
     onMessage: (ev) => {
-      handleWsMessage(ev, { username, show, setStatus, triggerWhiteout, getLastGood, setLastGood });
+      handleWsMessage(ev, { username, show, setStatus, triggerWhiteout, showSpeakerIcon, getLastGood, setLastGood });
     },
     onClose: () => {
       setStatus('WS déconnecté');

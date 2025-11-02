@@ -1,7 +1,7 @@
 // Message handlers: parse and route incoming WS events
-// ctx: { username, show(text), setStatus(text), triggerWhiteout(), getLastGood(), setLastGood(text) }
+// ctx: { username, show(text), setStatus(text), triggerWhiteout(durationMs?), showSpeakerIcon(durationMs?), getLastGood(), setLastGood(text) }
 export function handleWsMessage(ev, ctx) {
-  const { username, show, setStatus, triggerWhiteout, getLastGood, setLastGood } = ctx;
+  const { username, show, setStatus, triggerWhiteout, showSpeakerIcon, getLastGood, setLastGood } = ctx;
   try {
     let rawPayload = ev.data;
     let obj;
@@ -78,15 +78,25 @@ export function handleWsMessage(ev, ctx) {
     if (type === 'tiktok:don') {
       if (msgPayload && typeof msgPayload === 'object' && ('amount' in msgPayload)) {
         const amount = Number(msgPayload.amount);
-        // Placeholder: votre logique custom ici
-        if (!Number.isNaN(amount) && amount === 2) {
-          triggerWhiteout();
+        if (!Number.isNaN(amount)) {
+          if (amount === 2) {
+            // Show speaker icon for 5 seconds
+            if (typeof showSpeakerIcon === 'function') showSpeakerIcon(5000);
+          } else if (amount === 3) {
+            // Whiteout for 7 seconds
+            if (typeof triggerWhiteout === 'function') triggerWhiteout(7000);
+          }
         }
         return;
       }
+      // Legacy formats: payload numeric or string like "tiktok:don:2"
       const val = (msgPayload != null ? Number(msgPayload) : Number(obj && obj.data));
-      if (!Number.isNaN(val) && val === 2) {
-        triggerWhiteout();
+      if (!Number.isNaN(val)) {
+        if (val === 2) {
+          if (typeof showSpeakerIcon === 'function') showSpeakerIcon(5000);
+        } else if (val === 3) {
+          if (typeof triggerWhiteout === 'function') triggerWhiteout(7000);
+        }
       }
       return;
     }
