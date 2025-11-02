@@ -1,7 +1,25 @@
 // Message handlers: parse and route incoming WS events
-// ctx: { username, show(text), setStatus(text), triggerWhiteout(durationMs?), showSpeakerIcon(durationMs?), getLastGood(), setLastGood(text) }
+// ctx: { username, show(text), setStatus(text), triggerWhiteout(durationMs?), showSpeakerIcon(durationMs?), showYouTubePreview(videoId, durationMs?), getLastGood(), setLastGood(text) }
+
+function extractYouTubeId(input) {
+  if (!input || typeof input !== 'string') return '';
+  const s = input.trim();
+  // Try multiple patterns: youtu.be/ID, youtube.com/watch?v=ID, youtube.com/shorts/ID, youtube.com/embed/ID
+  const patterns = [
+    /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([A-Za-z0-9_-]{6,})/i,
+    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?[^\s]*v=([A-Za-z0-9_-]{6,})/i,
+    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/i,
+    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m && m[1]) return m[1];
+  }
+  return '';
+}
+
 export function handleWsMessage(ev, ctx) {
-  const { username, show, setStatus, triggerWhiteout, showSpeakerIcon, getLastGood, setLastGood } = ctx;
+  const { username, show, setStatus, triggerWhiteout, showSpeakerIcon, showYouTubePreview, getLastGood, setLastGood } = ctx;
   try {
     let rawPayload = ev.data;
     let obj;
@@ -85,6 +103,13 @@ export function handleWsMessage(ev, ctx) {
           } else if (amount === 3) {
             // Whiteout for 7 seconds
             if (typeof triggerWhiteout === 'function') triggerWhiteout(7000);
+          } else if (amount === 5) {
+            // Extract YouTube link from message and preview first 10s muted
+            const message = (msgPayload && msgPayload.message) ? String(msgPayload.message) : '';
+            const vid = extractYouTubeId(message);
+            if (vid && typeof showYouTubePreview === 'function') {
+              showYouTubePreview(vid, 10000);
+            }
           }
         }
         return;
