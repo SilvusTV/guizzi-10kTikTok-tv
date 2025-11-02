@@ -185,7 +185,7 @@
       } catch {}
     }
 
-    function playRandomFromPlaylist(){
+    function playRandomFromPlaylist(retry = 0){
       // Si l'API ou le player ne sont pas prêts, on prépare et on rejouera à onReady
       if (!ytApiReady || !audioPlayer || !audioReady) {
         pendingPlay = true;
@@ -193,18 +193,37 @@
         return;
       }
       try {
-        audioPlayer.setShuffle && audioPlayer.setShuffle(true);
+        // Forcer le son à 100%
         audioPlayer.unMute && audioPlayer.unMute();
         audioPlayer.setVolume && audioPlayer.setVolume(100);
+
+        // Récupérer la liste (IDs) déjà hydratée par cuePlaylist()
         const list = audioPlayer.getPlaylist ? audioPlayer.getPlaylist() : null;
         const len = Array.isArray(list) ? list.length : 0;
+
         if (len > 0) {
           const idx = Math.floor(Math.random() * len);
-          audioPlayer.playVideoAt ? audioPlayer.playVideoAt(idx) : audioPlayer.playVideo && audioPlayer.playVideo();
+          const vid = list[idx];
+          if (audioPlayer.loadVideoById && vid) {
+            // Lire UNE seule vidéo (pas la playlist), pour éviter l'auto-avance
+            audioPlayer.loadVideoById(vid);
+          } else if (audioPlayer.playVideoAt) {
+            // Secours: si loadVideoById indisponible, on lit à l'index
+            audioPlayer.playVideoAt(idx);
+          } else if (audioPlayer.playVideo) {
+            audioPlayer.playVideo();
+          }
+          return;
+        }
+
+        // Si la playlist n'est pas encore prête, on la prépare et on retente rapidement (petit nombre d'essais)
+        if (audioPlayer.cuePlaylist) {
+          audioPlayer.cuePlaylist({ listType: 'playlist', list: AUDIO_PLAYLIST_ID, index: 0 });
         } else if (audioPlayer.loadPlaylist) {
           audioPlayer.loadPlaylist({ listType: 'playlist', list: AUDIO_PLAYLIST_ID, index: 0 });
-        } else if (audioPlayer.playVideo) {
-          audioPlayer.playVideo();
+        }
+        if (retry < 4) {
+          setTimeout(() => playRandomFromPlaylist(retry + 1), 400);
         }
       } catch {}
     }
