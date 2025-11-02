@@ -76,6 +76,8 @@ body.whiteout #status { display: none; }
   border-radius: 8px;
   overflow: hidden;
   transform: scale(0.50);
+  transform-origin: bottom right;
+  aspect-ratio: 16/9;
   opacity: 0;
   transition: opacity 200ms ease, transform 200ms ease;
 }
